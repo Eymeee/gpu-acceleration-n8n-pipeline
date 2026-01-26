@@ -1,5 +1,5 @@
 {
-  "name": "V2",
+  "name": "Book_Summary",
   "nodes": [
     {
       "parameters": {
@@ -121,7 +121,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        864,
+        880,
         -160
       ],
       "id": "173aa491-361a-4173-8750-3a3866054c81",
@@ -149,7 +149,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        1040,
+        1072,
         32
       ],
       "id": "7f929f64-e9f2-49c7-a6e2-2516895783dc",
@@ -180,7 +180,7 @@
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 2.1,
       "position": [
-        1248,
+        1280,
         32
       ],
       "id": "c6e909bc-0c8e-4460-bcdc-be870bfbf54d",
@@ -191,6 +191,192 @@
           "name": "n8n free OpenAI API credits"
         }
       }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const msg = $json.output?.[0];\nconst text = msg?.content?.[0]?.text || \"\";\n\nreturn {\n  json: {\n    summary: text,\n    // keep useful fields if they exist upstream\n    chunk_index: $json.chunk_index ?? null,\n    total_chunks: $json.total_chunks ?? null,\n    query: $json.query ?? null,\n    best_url: $json.best_url ?? null,\n    sessionId: $json.sessionId ?? null\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1616,
+        -224
+      ],
+      "id": "355cb836-7bee-4dcb-ab5c-17c73c67da63",
+      "name": "Extract summary text"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst summaries = items\n  .map(i => i.json.summary)\n  .filter(Boolean);\n\nreturn [\n  {\n    json: {\n      combined_summaries: summaries.join(\"\\n\\n\")\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        -224
+      ],
+      "id": "8f326441-d288-483a-ab1d-9c1584bdee21",
+      "name": "Combine summaries"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You extract exactly ONE key idea from a given summary.\nBe faithful to the summary: no invented facts.\nReturn ONLY valid JSON. No markdown. No extra text."
+            },
+            {
+              "content": "=Extract ONE key idea from the summary below.\n\nRules:\n- Output in the same language as the summary.\n- The key idea must be concrete and non-trivial.\n- Keep it short.\n- Return JSON exactly in this schema:\n\n{\n  \"chunk_id\": \"CHUNK_<number>\",\n  \"key_idea_title\": \"max 10 words\",\n  \"key_idea\": \"1-2 sentences\",\n  \"tags\": [\"tag1\",\"tag2\",\"tag3\"]\n}\n\nchunk_id = \"CHUNK_{{ $itemIndex + 1 }}\"\n\nSUMMARY:\n{{ $json.summary }}\n"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        1840,
+        32
+      ],
+      "id": "9dc19bd9-4796-492f-a20f-5d5d63205ccb",
+      "name": "Key Idea per Summary",
+      "credentials": {
+        "openAiApi": {
+          "id": "EtSUGxP0lEXK0xs0",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// This node extracts the JSON string returned by the OpenAI node\n// located at: $json.output[0].content[0].text\n// Then parses it into real JSON fields: chunk_id, key_idea_title, key_idea, tags\n\nfunction findText(obj) {\n  // Handles the common n8n OpenAI structure:\n  // { output: [ { content: [ { type:\"output_text\", text:\"{...}\" } ] } ] }\n  const out = obj?.output;\n  if (!Array.isArray(out) || out.length === 0) return null;\n\n  const msg = out[0];\n  const content = msg?.content;\n  if (!Array.isArray(content) || content.length === 0) return null;\n\n  // Find first content element that has a \"text\"\n  const t = content.find(c => typeof c?.text === \"string\")?.text;\n  return t ?? null;\n}\n\nconst raw = findText($json);\n\nif (!raw) {\n  return {\n    json: {\n      ...$json,\n      parse_error: \"No text found at output[0].content[].text\"\n    }\n  };\n}\n\n// Sometimes the model returns valid JSON but with whitespace/newlines — JSON.parse handles that.\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  // fallback: try to extract first {...} block if extra text exists\n  const start = raw.indexOf(\"{\");\n  const end = raw.lastIndexOf(\"}\");\n  if (start !== -1 && end !== -1 && end > start) {\n    const candidate = raw.slice(start, end + 1);\n    try {\n      parsed = JSON.parse(candidate);\n    } catch (e2) {\n      return {\n        json: {\n          ...$json,\n          parse_error: \"JSON.parse failed\",\n          raw_text: raw\n        }\n      };\n    }\n  } else {\n    return {\n      json: {\n        ...$json,\n        parse_error: \"No JSON object found in text\",\n        raw_text: raw\n      }\n    };\n  }\n}\n\n// Output a clean object (you can also keep ...$json if you want)\n// I recommend returning only the parsed fields for clean downstream logic.\nreturn {\n  json: {\n    chunk_id: parsed.chunk_id,\n    key_idea_title: parsed.key_idea_title,\n    key_idea: parsed.key_idea,\n    tags: parsed.tags\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2176,
+        32
+      ],
+      "id": "08f33264-e95b-4ca8-a563-a563fdcdc68e",
+      "name": "Parse Key Idea JSON"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst bullets = items\n  .map((i, idx) => {\n    const title = i.json.key_idea_title || \"\";\n    const idea = i.json.key_idea || \"\";\n    return `- K${idx + 1}: ${title} — ${idea}`.trim();\n  })\n  .filter(Boolean)\n  .join(\"\\n\");\n\nreturn [{\n  json: {\n    key_ideas_bullets: bullets\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        32
+      ],
+      "id": "36587f56-eeb0-4819-ba8a-785985ed2cc2",
+      "name": "Combine Key Ideas (bulletpoints)"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are a professional technical writer.\nYou must stay faithful to the provided source text.\nDo NOT invent facts about the book beyond what is explicitly present.\nYou MAY add clearly labeled “Interpretation / Practical extensions” that are general (not claimed as sourced facts).\nWrite clean, structured, non-repetitive prose."
+            },
+            {
+              "content": "=INPUT:\nYou are given \"combined_summaries\" — a merged summary extracted from a web page about a book/article.\n\nGOAL:\nWrite a long, structured developed summary in Markdown, approximately 3,500–5,000 words (≈10 pages single-spaced style).\n\nSTRICTNESS:\n- Everything in sections titled “What the source says” must be supported by the provided text.\n- You may expand length using sections titled “Interpretation / Practical extensions” and “Illustrative examples”.\n- Do not claim you read the full book unless the source text explicitly says so.\n- Avoid hallucinating specific frameworks, chapter names, or techniques not stated in the input.\n\nFORMAT (Markdown):\n# Title\n## Context\n## What the source says (faithful)\n## Key themes (derived from source)\n## Detailed developed summary (faithful + deeper explanation)\n## Interpretation / Practical extensions (general reasoning)\n## Illustrative examples (clearly hypothetical)\n## Practical takeaways (actionable bullets)\n## Reflection questions\n## Glossary (only terms used)\n\nTEXT:\n{{ $json.combined_summaries }}\n"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.1,
+      "position": [
+        2048,
+        -224
+      ],
+      "id": "1b0a525b-fd80-4aba-81a8-3841261d6497",
+      "name": "Developed 10-page summary",
+      "credentials": {
+        "openAiApi": {
+          "id": "EtSUGxP0lEXK0xs0",
+          "name": "n8n free OpenAI API credits"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "function findText(obj) {\n  const out = obj?.output;\n  if (!Array.isArray(out) || out.length === 0) return null;\n\n  const msg = out[0];\n  const content = msg?.content;\n  if (!Array.isArray(content) || content.length === 0) return null;\n\n  return content.find(c => typeof c?.text === \"string\")?.text ?? null;\n}\n\nconst developed = findText($json);\n\nif (!developed) {\n  return [{\n    json: {\n      ...$json,\n      developed_summary_error: \"No text found at output[0].content[].text\"\n    }\n  }];\n}\n\n// Optional: simple word count (helpful to verify “10 pages” target)\nconst wordCount = developed.trim().split(/\\s+/).filter(Boolean).length;\n\nreturn [{\n  json: {\n    developed_summary: developed,\n    developed_summary_word_count: wordCount\n  }\n}];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2416,
+        -224
+      ],
+      "id": "890b34d2-5441-462b-9903-3c8cc0b8c820",
+      "name": "Extract Developed Summary Text (~10 pages)"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const bullets = ($json.key_ideas_bullets || \"\").trim();\n\nif (!bullets) {\n  return { json: { tts_error: \"key_ideas_bullets is empty\" } };\n}\n\n// Make it more natural to read aloud\n// \"- K1: Title — Idea\" -> \"Key idea 1. Title. Idea.\"\nconst lines = bullets\n  .split(\"\\n\")\n  .map(l => l.trim())\n  .filter(Boolean);\n\nconst spoken = [\n  \"Here are the key ideas.\",\n  \"\",\n  ...lines.map((l) => {\n    // remove leading \"- \"\n    let s = l.replace(/^-+\\s*/, \"\");\n\n    // K1: -> Key idea 1.\n    s = s.replace(/^K(\\d+)\\s*:\\s*/i, (_, n) => `Key idea ${n}. `);\n\n    // \" — \" -> \". \"\n    s = s.replace(/\\s+—\\s+/g, \". \");\n\n    return s;\n  }),\n  \"\",\n  \"End of key ideas.\"\n].join(\"\\n\");\n\nreturn {\n  json: {\n    tts_text: spoken\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        32
+      ],
+      "id": "1553a548-49d3-4626-8f05-debe248540b2",
+      "name": "Prepare TTS Text"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://router.huggingface.co/replicate/v1/predictions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer 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"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"inputs\": \"Sample static text\",\n  \"options\": { \"wait_for_model\": true }\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2816,
+        32
+      ],
+      "id": "d7d9e22e-5146-4823-b60c-f5d15b0c2ff4",
+      "name": "HTTP Request"
     }
   ],
   "pinData": {},
@@ -271,6 +457,99 @@
           }
         ]
       ]
+    },
+    "OpenAI — Summarize Chunk": {
+      "main": [
+        [
+          {
+            "node": "Extract summary text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract summary text": {
+      "main": [
+        [
+          {
+            "node": "Combine summaries",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Key Idea per Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine summaries": {
+      "main": [
+        [
+          {
+            "node": "Developed 10-page summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Key Idea per Summary": {
+      "main": [
+        [
+          {
+            "node": "Parse Key Idea JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Key Idea JSON": {
+      "main": [
+        [
+          {
+            "node": "Combine Key Ideas (bulletpoints)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Developed 10-page summary": {
+      "main": [
+        [
+          {
+            "node": "Extract Developed Summary Text (~10 pages)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Combine Key Ideas (bulletpoints)": {
+      "main": [
+        [
+          {
+            "node": "Prepare TTS Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare TTS Text": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
@@ -278,7 +557,7 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "2eec431c-cedd-40c0-82b8-b91bfd91ba37",
+  "versionId": "278310f2-ad4a-4912-ba45-b957905b0d96",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "f7cf473aeea6b7d675e1524fdc48773b41697ada5c726974863bb06f25c8d2a9"
