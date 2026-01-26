@@ -1,0 +1,1057 @@
+{
+  "name": "Book/Article → Scrape → Key Ideas + Long Summary + TTS",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "book-summary",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "4b82cc1d-dc31-4bc7-ae3d-c2215933c7ae",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -1840,
+        296
+      ],
+      "webhookId": "2f66cab8-fedf-497c-88d7-4715c50f5f58"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "query",
+              "value": "={{ $json.query }}",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "lang",
+              "value": "={{ $json.lang || 'en' }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "max_results",
+              "value": "={{ $json.max_results || 5 }}",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "2a021ae6-2336-41c5-8ff1-ba9866e1c62c",
+      "name": "Apply Defaults",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -1616,
+        296
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.SERPER_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.query }}"
+            },
+            {
+              "name": "num",
+              "value": "={{ $json.max_results }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "6d3de0be-169b-4dd6-9cce-b1d37ccadc8a",
+      "name": "Serper Search API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -1392,
+        296
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.organic }}",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f39fd51d-8285-45a2-b6e1-72f381052861",
+      "name": "Check Search Results",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1168,
+        296
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"error\": \"No search results\",\n  \"query\": \"={{ $('Apply Defaults').item.json.query }}\"\n}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "517f10a3-c8a8-4757-8032-1e96a00222c9",
+      "name": "Error: No Search Results",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -944,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.item.json.organic || []; const skipDomains = ['login', 'signin', 'signup', 'auth', 'ad.', 'ads.']; const preferDomains = ['.edu', '.org', 'wikipedia', 'goodreads', 'amazon']; let bestUrl = null; let bestScore = -1; for (const result of results) { const url = result.link || ''; const title = (result.title || '').toLowerCase(); const snippet = (result.snippet || '').toLowerCase(); if (!url || url.length < 10) continue; let score = 0; const urlLower = url.toLowerCase(); if (skipDomains.some(skip => urlLower.includes(skip))) continue; if (preferDomains.some(pref => urlLower.includes(pref))) score += 10; if (title.includes('book') || title.includes('summary') || snippet.includes('book')) score += 5; if (result.position) score -= result.position; if (score > bestScore) { bestScore = score; bestUrl = url; } } return [{ json: { best_url: bestUrl || results[0]?.link || '', query: $input.item.json.query } }];"
+      },
+      "id": "4ee658f5-ffcf-49dd-9bf9-70739323ca88",
+      "name": "Extract Best URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -944,
+        392
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.firecrawl.dev/v1/scrape",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.FIRECRAWL_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"={{ $json.best_url }}\",\n  \"formats\": [\"markdown\"],\n  \"onlyMainContent\": true\n}",
+        "options": {}
+      },
+      "id": "753528fd-0b09-484c-8b83-5deb22e3e740",
+      "name": "Firecrawl Scrape",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        -720,
+        392
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.success }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "0b1b006e-9fc6-4556-a2e9-04e2ce7c1f51",
+      "name": "Check Scrape Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -496,
+        392
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"error\": \"Scrape failed\",\n  \"source_url\": \"={{ $('Extract Best URL').item.json.best_url }}\"\n}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "503d8322-d8d3-4235-ba1c-2f04354f88e0",
+      "name": "Error: Scrape Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -272,
+        344
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const markdown = $input.item.json.data?.markdown || ''; const cleaned = markdown.replace(/\\s+/g, ' ').trim(); const chunkSize = 7000; const chunks = []; let start = 0; let chunkIndex = 0; while (start < cleaned.length) { let end = start + chunkSize; if (end < cleaned.length) { const lastPeriod = cleaned.lastIndexOf('.', end); const lastNewline = cleaned.lastIndexOf('\\n', end); end = Math.max(lastPeriod, lastNewline, start + 1000); } const chunkText = cleaned.substring(start, end).trim(); if (chunkText.length > 0) { chunks.push({ json: { chunk_index: chunkIndex++, chunk_text: chunkText, total_chunks: 0 } }); } start = end + 1; } chunks.forEach(chunk => chunk.json.total_chunks = chunks.length); return chunks;"
+      },
+      "id": "da9c162f-359b-4e93-9067-c11d0f4a794a",
+      "name": "Clean and Chunk Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        536
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "beec2807-3361-4c1c-b3f5-9cd62f9751c4",
+      "name": "Loop Over Chunks",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        -48,
+        536
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.OPENAI_BASE_URL || 'https://api.openai.com/v1') + '/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"temperature\": 0.2,\n  \"response_format\": {\"type\": \"json_object\"},\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"You summarize chunks of scraped article/book pages. Be faithful to the source. No hallucinations. Return JSON with keys: chunk_summary (array of max 10 bullet points), entities (array of names/organizations), numbers_dates (array of important numbers and dates).\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ 'Chunk ' + $json.chunk_index + ' of ' + $json.total_chunks + ':\\n\\n' + $json.chunk_text }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "37c5c3ed-8aff-4731-aa34-05ec183115ac",
+      "name": "LLM: Summarize Chunk",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        176,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.choices }}",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c18c9a59-8b61-45cf-8779-b1e1fa6d18e3",
+      "name": "Check LLM Chunk Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        400,
+        272
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"error\": \"LLM failed\",\n  \"step\": \"chunk_summarization\"\n}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "6b18cadd-50f9-41c9-bae5-5815d6ec9646",
+      "name": "Error: LLM Chunk Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        624,
+        176
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "c5a9c5c2-4185-4468-b865-348a581dbef6",
+      "name": "Collect Chunk Summaries",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        624,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.OPENAI_BASE_URL || 'https://api.openai.com/v1') + '/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\": \"gpt-4o-mini\", \"temperature\": 0.2, \"messages\": [{\"role\": \"system\", \"content\": \"You are an expert at creating detailed, structured summaries from chunk summaries. Write a comprehensive summary equivalent to ~10 pages. Structure: Title, Source URL, Introduction, Main Themes, Key Arguments, Examples, Conclusion. Avoid repetition. Only use information present in the chunk summaries.\"}, {\"role\": \"user\", \"content\": {{ 'Create a detailed structured summary from these chunk summaries:\\n\\n' + $input.all().map((item, i) => 'Chunk ' + i + ': ' + JSON.stringify(JSON.parse(item.json.choices[0].message.content))).join('\\n\\n') }}}]}",
+        "options": {}
+      },
+      "id": "83809ea8-348a-4ff8-94ff-15fa7b5421fb",
+      "name": "LLM: Generate Long Summary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        848,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.choices }}",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "db5a51bf-dcd8-4a8c-b143-ea9a03530950",
+      "name": "Check Long Summary Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1072,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"error\": \"LLM failed\",\n  \"step\": \"long_summary\"\n}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "669a965d-5828-4a91-a993-734046332804",
+      "name": "Error: Long Summary Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1296,
+        296
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"model\": \"gpt-4o-mini\", \"temperature\": 0.2, \"response_format\": {\"type\": \"json_object\"}, \"messages\": [{\"role\": \"system\", \"content\": \"Extract key ideas and actionable takeaways from a summary. Return JSON with keys: key_ideas (array of 10-15 bullet points), takeaways (array of 5 actionable insights).\"}, {\"role\": \"user\", \"content\": \"From this summary, extract 10-15 key ideas and 5 actionable takeaways:\\n\\n\" + $('LLM: Generate Long Summary').item.json.choices[0].message.content}]}",
+        "options": {}
+      },
+      "id": "d0e2ecd7-8f04-43ce-aaa5-7eecb45fb727",
+      "name": "LLM: Extract Key Ideas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1296,
+        488
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.choices }}",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "46e6704d-e634-46c9-a593-6f9a13b565bf",
+      "name": "Check Key Ideas Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1520,
+        488
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"error\": \"LLM failed\",\n  \"step\": \"key_ideas\"\n}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "a233da8e-d421-480d-a3a1-b6e93ed83f31",
+      "name": "Error: Key Ideas Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        1744,
+        392
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.OPENAI_BASE_URL || 'https://api.openai.com/v1') + '/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o-mini\",\n  \"temperature\": 0.2,\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Convert summaries into spoken narration scripts for 5-8 minutes of audio. Use simple sentences, smooth transitions, conversational tone. No links, no citations, no complex formatting. Just natural spoken language.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": {{ 'Convert this summary into a 5-8 minute spoken narration script:\\n\\n' + $('LLM: Generate Long Summary').item.json.choices[0].message.content }}\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "9b1a9c9a-d1c7-4dfd-86ff-60969f6813fb",
+      "name": "LLM: Generate TTS Script",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1744,
+        584
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $json.choices }}",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "2e49a86c-1f69-47a8-aa90-df1642088358",
+      "name": "Check TTS Script Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1968,
+        584
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"error\": \"LLM failed\",\n  \"step\": \"tts_script\"\n}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "c9b4f98c-f594-4e22-9499-2289603726a9",
+      "name": "Error: TTS Script Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2192,
+        488
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.OPENAI_BASE_URL || 'https://api.openai.com/v1') + '/audio/speech' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ 'Bearer ' + $env.OPENAI_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"tts-1\",\n  \"voice\": \"alloy\",\n  \"input\": {{ $json.tts_script }}\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "06646236-d305-4d06-848f-8379f17881f0",
+      "name": "OpenAI TTS API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2192,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "id-1",
+              "leftValue": "={{ $binary.data }}",
+              "operator": {
+                "type": "object",
+                "operation": "notEmpty"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1a59d8f-df81-4faf-b29d-aa13acd169c1",
+      "name": "Check TTS API Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2416,
+        680
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\n  \"error\": \"TTS API failed\",\n  \"step\": \"audio_generation\"\n}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "68127368-1d27-4b44-afea-ea02023d34de",
+      "name": "Error: TTS API Failed",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2640,
+        584
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "id-1",
+              "name": "query",
+              "value": "={{ $('Apply Defaults').item.json.query }}",
+              "type": "string"
+            },
+            {
+              "id": "id-2",
+              "name": "source_url",
+              "value": "={{ $('Extract Best URL').item.json.best_url }}",
+              "type": "string"
+            },
+            {
+              "id": "id-3",
+              "name": "key_ideas",
+              "value": "={{ JSON.parse($('LLM: Extract Key Ideas').item.json.choices[0].message.content).key_ideas }}",
+              "type": "array"
+            },
+            {
+              "id": "id-4",
+              "name": "takeaways",
+              "value": "={{ JSON.parse($('LLM: Extract Key Ideas').item.json.choices[0].message.content).takeaways }}",
+              "type": "array"
+            },
+            {
+              "id": "id-5",
+              "name": "long_summary",
+              "value": "={{ $('LLM: Generate Long Summary').item.json.choices[0].message.content }}",
+              "type": "string"
+            },
+            {
+              "id": "id-6",
+              "name": "tts_script",
+              "value": "={{ $('LLM: Generate TTS Script').item.json.choices[0].message.content }}",
+              "type": "string"
+            },
+            {
+              "id": "id-7",
+              "name": "tts_audio",
+              "value": "={{ $binary.data.toString('base64') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "64397ce1-e0a8-4eb6-95d9-197a73c5b879",
+      "name": "Prepare Final Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2640,
+        776
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "e7033731-d4ce-4291-9ff0-9c3eaf8559b9",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        2864,
+        776
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Apply Defaults",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Defaults": {
+      "main": [
+        [
+          {
+            "node": "Serper Search API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Serper Search API": {
+      "main": [
+        [
+          {
+            "node": "Check Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Search Results": {
+      "main": [
+        [
+          {
+            "node": "Extract Best URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: No Search Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Best URL": {
+      "main": [
+        [
+          {
+            "node": "Firecrawl Scrape",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firecrawl Scrape": {
+      "main": [
+        [
+          {
+            "node": "Check Scrape Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Scrape Success": {
+      "main": [
+        [
+          {
+            "node": "Clean and Chunk Text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Scrape Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clean and Chunk Text": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Chunks": {
+      "main": [
+        [
+          {
+            "node": "Collect Chunk Summaries",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "LLM: Summarize Chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Summarize Chunk": {
+      "main": [
+        [
+          {
+            "node": "Check LLM Chunk Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check LLM Chunk Success": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Chunks",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Collect Chunk Summaries",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Error: LLM Chunk Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect Chunk Summaries": {
+      "main": [
+        [
+          {
+            "node": "LLM: Generate Long Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Generate Long Summary": {
+      "main": [
+        [
+          {
+            "node": "Check Long Summary Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Long Summary Success": {
+      "main": [
+        [
+          {
+            "node": "LLM: Extract Key Ideas",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Long Summary Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Extract Key Ideas": {
+      "main": [
+        [
+          {
+            "node": "Check Key Ideas Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Key Ideas Success": {
+      "main": [
+        [
+          {
+            "node": "LLM: Generate TTS Script",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: Key Ideas Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM: Generate TTS Script": {
+      "main": [
+        [
+          {
+            "node": "Check TTS Script Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check TTS Script Success": {
+      "main": [
+        [
+          {
+            "node": "OpenAI TTS API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: TTS Script Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI TTS API": {
+      "main": [
+        [
+          {
+            "node": "Check TTS API Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check TTS API Success": {
+      "main": [
+        [
+          {
+            "node": "Prepare Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error: TTS API Failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Final Response": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "ac8536b3-a765-4bf7-816a-f07fdea624fd",
+  "meta": {
+    "instanceId": "f7cf473aeea6b7d675e1524fdc48773b41697ada5c726974863bb06f25c8d2a9"
+  },
+  "id": "lnPJKu-ONW8C8ayL4XHrg",
+  "tags": []
+}
