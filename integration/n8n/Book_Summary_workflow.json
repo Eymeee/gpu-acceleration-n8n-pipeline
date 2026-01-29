@@ -1,5 +1,5 @@
 {
-  "name": "Book_Summary",
+  "name": "Book_Summary_workflow",
   "nodes": [
     {
       "parameters": {
@@ -350,14 +350,12 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://router.huggingface.co/replicate/v1/predictions",
+        "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleOAuth2Api",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Authorization",
-              "value": "Bearer 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"
-            },
             {
               "name": "Content-Type",
               "value": "application/json"
@@ -366,7 +364,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"inputs\": \"Sample static text\",\n  \"options\": { \"wait_for_model\": true }\n}",
+        "jsonBody": "={\n  \"input\": {\n    \"text\": \"{{ JSON.stringify($json.tts_text).slice(1,-1) }}\"\n  },\n  \"voice\": {\n    \"languageCode\": \"en-US\",\n    \"name\": \"en-US-Neural2-D\"\n  },\n  \"audioConfig\": {\n    \"audioEncoding\": \"MP3\"\n  }\n}\n",
         "options": {}
       },
       "type": "n8n-nodes-base.httpRequest",
@@ -375,8 +373,31 @@
         2816,
         32
       ],
-      "id": "d7d9e22e-5146-4823-b60c-f5d15b0c2ff4",
-      "name": "HTTP Request"
+      "id": "1f77560f-5ac0-4096-9f51-9cc9b4f540e8",
+      "name": "Google API - TTS",
+      "credentials": {
+        "googleOAuth2Api": {
+          "id": "2ljVh7A8nMIpTuyE",
+          "name": "Text to speech"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "audioContent",
+        "options": {
+          "fileName": "Key-Ideas.mp3"
+        }
+      },
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        3024,
+        32
+      ],
+      "id": "88499f34-ef0c-4ba1-a44d-dc51821ff8a3",
+      "name": "Convert to File"
     }
   ],
   "pinData": {},
@@ -544,7 +565,18 @@
       "main": [
         [
           {
-            "node": "HTTP Request",
+            "node": "Google API - TTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google API - TTS": {
+      "main": [
+        [
+          {
+            "node": "Convert to File",
             "type": "main",
             "index": 0
           }
@@ -557,7 +589,7 @@
     "executionOrder": "v1",
     "availableInMCP": false
   },
-  "versionId": "278310f2-ad4a-4912-ba45-b957905b0d96",
+  "versionId": "fb0bb4a1-c653-4495-95cd-a72dbe1c225e",
   "meta": {
     "templateCredsSetupCompleted": true,
     "instanceId": "f7cf473aeea6b7d675e1524fdc48773b41697ada5c726974863bb06f25c8d2a9"
